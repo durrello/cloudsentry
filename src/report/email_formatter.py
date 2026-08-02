@@ -80,26 +80,29 @@ def format_email(report):
 <tr><td style="padding:12px 20px;">
 <p style="margin:0 0 8px;font-size:11px;font-weight:600;color:#a8b2d1;text-transform:uppercase;letter-spacing:1px;">Cost</p>
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="font-size:13px;">
-<tr><td style="padding:4px 0;color:#a8b2d1;">Month-to-date</td><td align="right" style="padding:4px 0;color:#e8e8e8;font-weight:500;">${cost.get('month_to_date', 0):.2f}</td></tr>
+<tr><td style="padding:4px 0;color:#a8b2d1;">Month-to-date (gross)</td><td align="right" style="padding:4px 0;color:#e8e8e8;font-weight:500;">${cost.get('month_to_date_gross', 0):.2f}</td></tr>
 """
-            if cost.get("forecast"):
-                html += f'<tr><td style="padding:4px 0;color:#a8b2d1;">Forecast</td><td align="right" style="padding:4px 0;color:#e8e8e8;font-weight:500;">${cost["forecast"]:.2f}</td></tr>'
-            if cost.get("last_month"):
-                html += f'<tr><td style="padding:4px 0;color:#a8b2d1;">Last month</td><td align="right" style="padding:4px 0;color:#e8e8e8;font-weight:500;">${cost["last_month"]:.2f}</td></tr>'
+            if cost.get("last_month_gross"):
+                html += f'<tr><td style="padding:4px 0;color:#a8b2d1;">Last month (gross)</td><td align="right" style="padding:4px 0;color:#e8e8e8;font-weight:500;">${cost["last_month_gross"]:.2f}</td></tr>'
+            if cost.get("raw_usage_mtd"):
+                html += f'<tr><td style="padding:4px 0;color:#a8b2d1;">Usage</td><td align="right" style="padding:4px 0;color:#e8e8e8;font-weight:500;">${cost["raw_usage_mtd"]:.2f}</td></tr>'
+            if cost.get("subscriptions_mtd"):
+                html += f'<tr><td style="padding:4px 0;color:#a8b2d1;">Subscriptions</td><td align="right" style="padding:4px 0;color:#e8e8e8;font-weight:500;">${cost["subscriptions_mtd"]:.2f}</td></tr>'
             if burn.get("daily_rate", 0) > 0:
                 html += f'<tr><td style="padding:4px 0;color:#a8b2d1;">Daily burn</td><td align="right" style="padding:4px 0;color:#e8e8e8;font-weight:500;">${burn["daily_rate"]:.2f}/day</td></tr>'
                 html += f'<tr><td style="padding:4px 0;color:#a8b2d1;">Annual rate</td><td align="right" style="padding:4px 0;color:#e8e8e8;font-weight:500;">${burn["annual_rate"]:.2f}/yr</td></tr>'
 
             # Credits
-            if credits.get("has_credits") or credits.get("total_credits", 0) > 0:
-                remaining = credits.get("credits_remaining", 0)
-                html += f'<tr><td style="padding:4px 0;color:#a8b2d1;">Credits used</td><td align="right" style="padding:4px 0;color:#e8e8e8;font-weight:500;">${credits.get("total_credits", 0):.2f}</td></tr>'
-                if remaining > 0:
-                    html += f'<tr><td style="padding:4px 0;color:#a8b2d1;">Credits remaining</td><td align="right" style="padding:4px 0;color:#2ed573;font-weight:500;">${remaining:.2f}</td></tr>'
-                if burn.get("credits_exhaust_date"):
-                    html += f'<tr><td style="padding:4px 0;color:#a8b2d1;">Credits run out</td><td align="right" style="padding:4px 0;color:#ff4757;font-weight:500;">{burn["credits_exhaust_date"]}</td></tr>'
-                if burn.get("credits_exhaust_date_optimized"):
-                    html += f'<tr><td style="padding:4px 0;color:#a8b2d1;">With fixes applied</td><td align="right" style="padding:4px 0;color:#2ed573;font-weight:500;">{burn["credits_exhaust_date_optimized"]}</td></tr>'
+            if credits.get("has_credits"):
+                total_applied = credits.get("total_credits_applied", 0)
+                this_month_credits = credits.get("credits_this_month", 0)
+                last_month_credits = credits.get("credits_last_month", 0)
+                html += f'<tr><td style="padding:4px 0;color:#a8b2d1;">Credits applied (6mo)</td><td align="right" style="padding:4px 0;color:#e8e8e8;font-weight:500;">${total_applied:.2f}</td></tr>'
+                html += f'<tr><td style="padding:4px 0;color:#a8b2d1;">Credits this month</td><td align="right" style="padding:4px 0;color:#2ed573;font-weight:500;">${this_month_credits:.2f}</td></tr>'
+                html += f'<tr><td style="padding:4px 0;color:#a8b2d1;">Credits last month</td><td align="right" style="padding:4px 0;color:#2ed573;font-weight:500;">${last_month_credits:.2f}</td></tr>'
+                coverage = burn.get("credits_coverage")
+                if coverage:
+                    html += f'<tr><td style="padding:4px 0;color:#a8b2d1;">Coverage</td><td align="right" style="padding:4px 0;color:#2ed573;font-weight:500;">{coverage} covered</td></tr>'
 
             html += '</table></td></tr>'
 

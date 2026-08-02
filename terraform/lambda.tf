@@ -20,7 +20,6 @@ resource "aws_lambda_function" "scanner" {
   environment {
     variables = {
       ACCOUNT_NAME                      = var.account_name
-      TOTAL_CREDITS_AMOUNT              = tostring(var.total_credits_amount)
       NOTIFICATION_EMAILS               = jsonencode(var.notification_emails)
       DYNAMODB_TABLE                    = aws_dynamodb_table.history.name
       SNS_TOPIC_ARN                     = aws_sns_topic.notifications.arn

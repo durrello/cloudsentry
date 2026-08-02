@@ -16,13 +16,17 @@ def scan_cost(session, config):
     """Run cost intelligence scan. Returns cost data dict."""
     cost_data = {
         "month_to_date": 0.0,
+        "month_to_date_gross": 0.0,
         "forecast": 0.0,
         "last_month": 0.0,
+        "last_month_gross": 0.0,
         "top_services": [],
         "by_service": {},
         "budget_status": [],
         "credits": {},
         "burn_rate": {},
+        "raw_usage_mtd": 0.0,
+        "subscriptions_mtd": 0.0,
     }
 
     try:
@@ -50,17 +54,23 @@ def scan_cost(session, config):
                 amount = float(result["Total"]["UnblendedCost"]["Amount"])
                 cost_data["month_to_date"] += amount
 
-            # Also get raw usage (before credits) for burn rate
-            mtd_usage = ce.get_cost_and_usage(
+            # Get breakdown by record type (usage, credits, subscriptions)
+            mtd_breakdown = ce.get_cost_and_usage(
                 TimePeriod={"Start": month_start, "End": tomorrow},
                 Granularity="MONTHLY",
                 Metrics=["UnblendedCost"],
                 GroupBy=[{"Type": "DIMENSION", "Key": "RECORD_TYPE"}],
             )
-            for result in mtd_usage["ResultsByTime"]:
+            for result in mtd_breakdown["ResultsByTime"]:
                 for group in result.get("Groups", []):
-                    if group["Keys"][0] == "Usage":
-                        cost_data["raw_usage_mtd"] = float(group["Metrics"]["UnblendedCost"]["Amount"])
+                    amount = float(group["Metrics"]["UnblendedCost"]["Amount"])
+                    rtype = group["Keys"][0]
+                    if rtype == "Usage":
+                        cost_data["raw_usage_mtd"] = amount
+                    elif rtype == "FlatRateSubscription":
+                        cost_data["subscriptions_mtd"] = amount
+
+            cost_data["month_to_date_gross"] = cost_data["raw_usage_mtd"] + cost_data["subscriptions_mtd"]
         except Exception as e:
             logger.error(f"Error getting MTD cost: {e}")
 
@@ -75,6 +85,25 @@ def scan_cost(session, config):
                 cost_data["last_month"] += float(
                     result["Total"]["UnblendedCost"]["Amount"]
                 )
+
+            # Last month gross (usage + subscriptions)
+            last_breakdown = ce.get_cost_and_usage(
+                TimePeriod={"Start": last_month_start, "End": last_month_end},
+                Granularity="MONTHLY",
+                Metrics=["UnblendedCost"],
+                GroupBy=[{"Type": "DIMENSION", "Key": "RECORD_TYPE"}],
+            )
+            last_usage = 0
+            last_subs = 0
+            for result in last_breakdown["ResultsByTime"]:
+                for group in result.get("Groups", []):
+                    amount = float(group["Metrics"]["UnblendedCost"]["Amount"])
+                    rtype = group["Keys"][0]
+                    if rtype == "Usage":
+                        last_usage = amount
+                    elif rtype == "FlatRateSubscription":
+                        last_subs = amount
+            cost_data["last_month_gross"] = last_usage + last_subs
         except Exception as e:
             logger.error(f"Error getting last month cost: {e}")
 
@@ -156,48 +185,57 @@ def scan_cost(session, config):
 
 
 def get_credits_info(ce, now):
-    """Get AWS credits and balance information."""
+    """Get AWS credits information purely from AWS APIs. No hardcoded values."""
     credits_info = {
-        "total_credits": 0.0,
-        "credits_used": 0.0,
+        "total_credits_applied": 0.0,
+        "credits_this_month": 0.0,
+        "credits_last_month": 0.0,
         "credits_remaining": 0.0,
         "has_credits": False,
+        "monthly_credit_trend": [],
     }
 
-    total_pool = float(os.environ.get("TOTAL_CREDITS_AMOUNT", "0"))
-
     try:
-        # Get total credits used this year
-        year_start = f"{now.year}-01-01"
         tomorrow = (now + timedelta(days=1)).strftime("%Y-%m-%d")
+        
+        # Get monthly credit application for the last 6 months
+        six_months_ago = (now - timedelta(days=180)).replace(day=1).strftime("%Y-%m-%d")
+        
+        credits_history = ce.get_cost_and_usage(
+            TimePeriod={"Start": six_months_ago, "End": tomorrow},
+            Granularity="MONTHLY",
+            Metrics=["UnblendedCost"],
+            GroupBy=[{"Type": "DIMENSION", "Key": "RECORD_TYPE"}],
+        )
 
-        try:
-            credits_yearly = ce.get_cost_and_usage(
-                TimePeriod={"Start": year_start, "End": tomorrow},
-                Granularity="MONTHLY",
-                Metrics=["UnblendedCost"],
-                GroupBy=[{"Type": "DIMENSION", "Key": "RECORD_TYPE"}],
-            )
-
-            for result in credits_yearly["ResultsByTime"]:
-                for group in result.get("Groups", []):
-                    if group["Keys"][0] == "Credit":
-                        credits_info["total_credits"] += abs(float(group["Metrics"]["UnblendedCost"]["Amount"]))
+        monthly_credits = []
+        for result in credits_history["ResultsByTime"]:
+            month = result["TimePeriod"]["Start"]
+            for group in result.get("Groups", []):
+                if group["Keys"][0] == "Credit":
+                    amount = abs(float(group["Metrics"]["UnblendedCost"]["Amount"]))
+                    if amount > 0:
+                        monthly_credits.append({"month": month, "amount": amount})
+                        credits_info["total_credits_applied"] += amount
                         credits_info["has_credits"] = True
 
-        except Exception as e:
-            logger.error(f"Error getting yearly credits: {e}")
+        credits_info["monthly_credit_trend"] = monthly_credits
 
-        # Calculate remaining
-        if total_pool > 0:
-            credits_info["credits_remaining"] = max(0, total_pool - credits_info["total_credits"])
-        elif credits_info["total_credits"] > 0:
-            # Estimate pool from common amounts
-            common_pools = [200, 300, 500, 1000, 2000]
-            for pool in common_pools:
-                if credits_info["total_credits"] < pool:
-                    credits_info["credits_remaining"] = pool - credits_info["total_credits"]
-                    break
+        # Current month credits
+        if monthly_credits:
+            credits_info["credits_this_month"] = monthly_credits[-1]["amount"] if monthly_credits else 0
+            if len(monthly_credits) >= 2:
+                credits_info["credits_last_month"] = monthly_credits[-2]["amount"]
+
+        # Try to get remaining credits via the billing conductor or organizations API
+        # AWS doesn't expose a direct "remaining credits" endpoint
+        # But we can check if credits are still being applied (if yes, pool not exhausted)
+        # The best signal is: are credits actively reducing our bill this month?
+        if credits_info["credits_this_month"] > 0:
+            # Credits are still active. Estimate remaining based on the pattern.
+            # If last month used $348 in credits and this month is on track for similar,
+            # credits are still available.
+            pass
 
     except Exception as e:
         logger.error(f"Error getting credits info: {e}")
@@ -219,21 +257,16 @@ def calculate_burn_rate(cost_data, now):
         "optimized_annual_rate": 0.0,
     }
 
-    # Calculate daily burn rate from raw usage (before credits offset)
-    raw_usage = cost_data.get("raw_usage_mtd", 0)
-    mtd = cost_data.get("month_to_date", 0)
+    # Calculate daily burn rate from gross spend (usage + subscriptions)
+    gross_mtd = cost_data.get("month_to_date_gross", 0)
+    last_month_gross = cost_data.get("last_month_gross", 0)
     days_elapsed = max(now.day, 1)
 
-    # Prefer raw usage (actual spend before credits)
-    # Fall back to last month if early in month
-    last_month = cost_data.get("last_month", 0)
-    
-    effective_spend = raw_usage if raw_usage > 0 else abs(mtd) if mtd != 0 else 0
-    
-    if effective_spend > 0:
-        burn_rate["daily_rate"] = effective_spend / days_elapsed
-    elif last_month > 0:
-        burn_rate["daily_rate"] = abs(last_month) / 30
+    # Use gross MTD if available, fall back to last month gross
+    if gross_mtd > 0:
+        burn_rate["daily_rate"] = gross_mtd / days_elapsed
+    elif last_month_gross > 0:
+        burn_rate["daily_rate"] = last_month_gross / 30
 
     if burn_rate["daily_rate"] > 0:
         burn_rate["monthly_rate"] = burn_rate["daily_rate"] * 30
@@ -250,24 +283,28 @@ def calculate_burn_rate(cost_data, now):
     burn_rate["optimized_monthly_rate"] = max(0, burn_rate["monthly_rate"] - waste_savings)
     burn_rate["optimized_annual_rate"] = burn_rate["optimized_monthly_rate"] * 12
 
-    # Credits runway calculation
+    # Credits runway calculation (data-driven, no assumptions)
     credits = cost_data.get("credits", {})
-    credits_remaining = credits.get("credits_remaining", 0)
-
-    if credits_remaining > 0 and burn_rate["daily_rate"] > 0:
-        # At current rate
-        days_left = int(credits_remaining / burn_rate["daily_rate"])
-        burn_rate["days_until_credits_expire"] = days_left
-        exhaust_date = now + timedelta(days=days_left)
-        burn_rate["credits_exhaust_date"] = exhaust_date.strftime("%B %d, %Y")
-
-        # With fixes applied (optimized rate)
-        optimized_daily = burn_rate["optimized_monthly_rate"] / 30
-        if optimized_daily > 0:
-            optimized_days = int(credits_remaining / optimized_daily)
-            optimized_exhaust = now + timedelta(days=optimized_days)
-            burn_rate["credits_exhaust_date_optimized"] = optimized_exhaust.strftime("%B %d, %Y")
-        else:
-            burn_rate["credits_exhaust_date_optimized"] = "Never (no spend after fixes)"
+    
+    # If credits are actively covering the bill, estimate how long they'll last
+    # based on the trend of monthly credit application
+    if credits.get("has_credits") and burn_rate["daily_rate"] > 0:
+        credits_last_month = credits.get("credits_last_month", 0)
+        gross_last_month = cost_data.get("last_month_gross", 0)
+        
+        # If credits fully covered last month (credit >= gross), they're still active
+        if credits_last_month > 0 and gross_last_month > 0:
+            coverage_ratio = credits_last_month / gross_last_month
+            if coverage_ratio >= 0.95:
+                burn_rate["credits_status"] = "fully_covered"
+                burn_rate["credits_coverage"] = f"{coverage_ratio * 100:.0f}%"
+            else:
+                burn_rate["credits_status"] = "partially_covered"
+                burn_rate["credits_coverage"] = f"{coverage_ratio * 100:.0f}%"
+        
+        # Total credits applied gives a lower bound of the pool size
+        total_applied = credits.get("total_credits_applied", 0)
+        if total_applied > 0:
+            burn_rate["total_credits_applied"] = total_applied
 
     return burn_rate
