@@ -4,6 +4,7 @@ Checks current spend, forecast, credits, and calculates burn rate.
 """
 
 import logging
+import os
 from datetime import datetime, timezone, timedelta
 
 from utils.findings import create_finding
@@ -151,30 +152,14 @@ def get_credits_info(ce, now):
         "has_credits": False,
     }
 
+    total_pool = float(os.environ.get("TOTAL_CREDITS_AMOUNT", "0"))
+
     try:
-        # Get credits usage for current month
-        month_start = now.strftime("%Y-%m-01")
+        # Get total credits used this year
+        year_start = f"{now.year}-01-01"
         tomorrow = (now + timedelta(days=1)).strftime("%Y-%m-%d")
 
-        # Check for credits by looking at the Credits metric
-        credits_result = ce.get_cost_and_usage(
-            TimePeriod={"Start": month_start, "End": tomorrow},
-            Granularity="MONTHLY",
-            Metrics=["UnblendedCost"],
-            GroupBy=[{"Type": "DIMENSION", "Key": "RECORD_TYPE"}],
-        )
-
-        for result in credits_result["ResultsByTime"]:
-            for group in result.get("Groups", []):
-                record_type = group["Keys"][0]
-                amount = float(group["Metrics"]["UnblendedCost"]["Amount"])
-                if record_type == "Credit":
-                    credits_info["credits_used"] = abs(amount)
-                    credits_info["has_credits"] = True
-
-        # Try to get total credits from a longer lookback
         try:
-            year_start = f"{now.year}-01-01"
             credits_yearly = ce.get_cost_and_usage(
                 TimePeriod={"Start": year_start, "End": tomorrow},
                 Granularity="MONTHLY",
@@ -182,15 +167,25 @@ def get_credits_info(ce, now):
                 GroupBy=[{"Type": "DIMENSION", "Key": "RECORD_TYPE"}],
             )
 
-            total_credits_used = 0.0
             for result in credits_yearly["ResultsByTime"]:
                 for group in result.get("Groups", []):
                     if group["Keys"][0] == "Credit":
-                        total_credits_used += abs(float(group["Metrics"]["UnblendedCost"]["Amount"]))
+                        credits_info["total_credits"] += abs(float(group["Metrics"]["UnblendedCost"]["Amount"]))
+                        credits_info["has_credits"] = True
 
-            credits_info["total_credits"] = total_credits_used
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error(f"Error getting yearly credits: {e}")
+
+        # Calculate remaining
+        if total_pool > 0:
+            credits_info["credits_remaining"] = max(0, total_pool - credits_info["total_credits"])
+        elif credits_info["total_credits"] > 0:
+            # Estimate pool from common amounts
+            common_pools = [200, 300, 500, 1000, 2000]
+            for pool in common_pools:
+                if credits_info["total_credits"] < pool:
+                    credits_info["credits_remaining"] = pool - credits_info["total_credits"]
+                    break
 
     except Exception as e:
         logger.error(f"Error getting credits info: {e}")
@@ -205,6 +200,8 @@ def calculate_burn_rate(cost_data, now):
         "monthly_rate": 0.0,
         "annual_rate": 0.0,
         "days_until_credits_expire": None,
+        "credits_exhaust_date": None,
+        "credits_exhaust_date_optimized": None,
         "potential_monthly_savings": 0.0,
         "optimized_monthly_rate": 0.0,
         "optimized_annual_rate": 0.0,
@@ -214,16 +211,21 @@ def calculate_burn_rate(cost_data, now):
     mtd = cost_data.get("month_to_date", 0)
     days_elapsed = max(now.day, 1)
 
-    if mtd > 0:
+    # Use last month if MTD is too low (early in month)
+    last_month = cost_data.get("last_month", 0)
+    if mtd <= 0 and last_month > 0:
+        burn_rate["daily_rate"] = last_month / 30
+    elif mtd > 0:
         burn_rate["daily_rate"] = mtd / days_elapsed
+    elif last_month > 0:
+        burn_rate["daily_rate"] = last_month / 30
+
+    if burn_rate["daily_rate"] > 0:
         burn_rate["monthly_rate"] = burn_rate["daily_rate"] * 30
         burn_rate["annual_rate"] = burn_rate["daily_rate"] * 365
 
     # Estimate potential savings from waste findings
-    # (EIPs cost $3.60/mo, idle LBs ~$16/mo, unattached volumes vary)
-    # This is a rough estimate based on common waste patterns
     waste_savings = 0.0
-    # Count from budget_status (things over budget could be optimized)
     for budget in cost_data.get("budget_status", []):
         if budget["status"] == "over":
             overage = budget["spend"] - budget["cap"]
@@ -233,11 +235,24 @@ def calculate_burn_rate(cost_data, now):
     burn_rate["optimized_monthly_rate"] = max(0, burn_rate["monthly_rate"] - waste_savings)
     burn_rate["optimized_annual_rate"] = burn_rate["optimized_monthly_rate"] * 12
 
-    # Credits runway
+    # Credits runway calculation
     credits = cost_data.get("credits", {})
-    if credits.get("has_credits") and burn_rate["daily_rate"] > 0:
-        remaining = credits.get("credits_remaining", 0)
-        if remaining > 0:
-            burn_rate["days_until_credits_expire"] = int(remaining / burn_rate["daily_rate"])
+    credits_remaining = credits.get("credits_remaining", 0)
+
+    if credits_remaining > 0 and burn_rate["daily_rate"] > 0:
+        # At current rate
+        days_left = int(credits_remaining / burn_rate["daily_rate"])
+        burn_rate["days_until_credits_expire"] = days_left
+        exhaust_date = now + timedelta(days=days_left)
+        burn_rate["credits_exhaust_date"] = exhaust_date.strftime("%B %d, %Y")
+
+        # With fixes applied (optimized rate)
+        optimized_daily = burn_rate["optimized_monthly_rate"] / 30
+        if optimized_daily > 0:
+            optimized_days = int(credits_remaining / optimized_daily)
+            optimized_exhaust = now + timedelta(days=optimized_days)
+            burn_rate["credits_exhaust_date_optimized"] = optimized_exhaust.strftime("%B %d, %Y")
+        else:
+            burn_rate["credits_exhaust_date_optimized"] = "Never (no spend after fixes)"
 
     return burn_rate

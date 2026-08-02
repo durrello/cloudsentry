@@ -20,6 +20,8 @@ resource "aws_lambda_function" "scanner" {
   environment {
     variables = {
       ACCOUNT_NAME                      = var.account_name
+      TOTAL_CREDITS_AMOUNT              = tostring(var.total_credits_amount)
+      NOTIFICATION_EMAILS               = jsonencode(var.notification_emails)
       DYNAMODB_TABLE                    = aws_dynamodb_table.history.name
       SNS_TOPIC_ARN                     = aws_sns_topic.notifications.arn
       S3_BUCKET                         = aws_s3_bucket.dashboard.id
@@ -270,6 +272,14 @@ resource "aws_iam_role_policy" "lambda_services" {
           "s3:GetObject"
         ]
         Resource = "${aws_s3_bucket.dashboard.arn}/*"
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "ses:SendEmail",
+          "ses:SendRawEmail"
+        ]
+        Resource = "*"
       }
     ]
   })

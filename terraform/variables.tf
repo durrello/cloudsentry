@@ -147,3 +147,10 @@ variable "dashboard_acm_cert_arn" {
   type        = string
   default     = ""
 }
+
+
+variable "total_credits_amount" {
+  description = "Total AWS credits available in the account (for runway calculation). Set to 0 if no credits."
+  type        = number
+  default     = 0
+}

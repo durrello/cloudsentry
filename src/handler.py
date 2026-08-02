@@ -242,23 +242,47 @@ def upload_dashboard(html, scan_date):
 
 
 def send_email(email_body, scan_date):
-    """Send report via SNS email (HTML format)."""
+    """Send report via SES (HTML email) with SNS as fallback."""
     import boto3
 
+    # Try SES first (renders HTML properly)
+    ses = boto3.client("ses", region_name="us-east-1")
+    notification_emails = json.loads(os.environ.get("NOTIFICATION_EMAILS", "[]"))
+
+    if notification_emails:
+        try:
+            ses.send_email(
+                Source=notification_emails[0],  # Send from first email (must be verified in SES)
+                Destination={"ToAddresses": notification_emails},
+                Message={
+                    "Subject": {"Data": f"CloudSentry Report - {scan_date}", "Charset": "UTF-8"},
+                    "Body": {
+                        "Html": {"Data": email_body, "Charset": "UTF-8"},
+                    },
+                },
+            )
+            logger.info("Report sent via SES")
+            return
+        except Exception as e:
+            logger.warning(f"SES send failed (falling back to SNS): {e}")
+
+    # Fallback: send plain-text summary via SNS
     sns = boto3.client("sns")
     topic_arn = os.environ["SNS_TOPIC_ARN"]
 
-    # SNS email sends the Message as-is (HTML content)
+    # Strip HTML for SNS fallback
+    plain_text = f"""CloudSentry Report - {scan_date}
+
+View the full HTML report at:
+https://cloudsentry.durrellgemuh.com/reports/latest.html
+
+(Email sent as plain text because SES is not configured. 
+Verify your sender email in SES to receive styled HTML reports.)
+"""
     sns.publish(
         TopicArn=topic_arn,
         Subject=f"CloudSentry Report - {scan_date}",
-        Message=email_body,
-        MessageAttributes={
-            "content-type": {
-                "DataType": "String",
-                "StringValue": "text/html",
-            }
-        },
+        Message=plain_text,
     )
 
 

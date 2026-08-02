@@ -84,7 +84,7 @@ def render_account_section(acct):
 
     html = f"""
 <section class="account">
-<h2>{acct['name']} <span class="account-id">({acct['account_id']})</span></h2>
+<h2>{acct['name']}</h2>
 
 <div class="score-section">
 <div class="score-circle grade-{grade.lower()}">{acct['score']}</div>
@@ -107,6 +107,16 @@ def render_account_section(acct):
 <tr><td>Last month total</td><td>${cost.get('last_month', 0):.2f}</td></tr>
 </table>
 """
+        # Cost by service
+        top_services = cost.get("top_services", [])
+        if top_services:
+            html += '<h4 style="color:#94a3b8;margin-top:12px;">Cost by Service</h4>'
+            html += '<table>'
+            html += '<tr><th style="text-align:left">Service</th><th style="text-align:right">Cost</th></tr>'
+            for svc in top_services:
+                html += f'<tr><td>{svc["service"]}</td><td style="text-align:right">${svc["amount"]:.2f}</td></tr>'
+            html += '</table>'
+
         # Burn rate
         burn = cost.get("burn_rate", {})
         if burn.get("daily_rate", 0) > 0:
@@ -126,14 +136,24 @@ def render_account_section(acct):
 
         # Credits
         credits = cost.get("credits", {})
-        if credits.get("has_credits"):
+        if credits.get("has_credits") or credits.get("total_credits", 0) > 0:
+            credits_used = credits.get('total_credits', 0)
+            credits_remaining = credits.get('credits_remaining', 0)
+            total_pool = credits_used + credits_remaining if credits_remaining > 0 else 0
+
             html += f"""
-<h4 style="color:#94a3b8;margin-top:12px;">Credits</h4>
+<h4 style="color:#94a3b8;margin-top:12px;">Credits &amp; Runway</h4>
 <table>
-<tr><td>Credits used (this year)</td><td>${credits.get('total_credits', 0):.2f}</td></tr>
 """
-            if burn.get("days_until_credits_expire") is not None:
-                html += f"<tr><td>Estimated days until credits run out</td><td>{burn['days_until_credits_expire']} days</td></tr>"
+            if total_pool > 0:
+                html += f'<tr><td>Total credits pool</td><td>${total_pool:.2f}</td></tr>'
+            html += f'<tr><td>Credits used (this year)</td><td>${credits_used:.2f}</td></tr>'
+            if credits_remaining > 0:
+                html += f'<tr><td>Credits remaining</td><td style="color:#4ade80">${credits_remaining:.2f}</td></tr>'
+            if burn.get("credits_exhaust_date"):
+                html += f'<tr><td>At current rate, credits run out</td><td style="color:#ef4444">{burn["credits_exhaust_date"]}</td></tr>'
+            if burn.get("credits_exhaust_date_optimized"):
+                html += f'<tr><td>With all fixes, credits last until</td><td style="color:#4ade80">{burn["credits_exhaust_date_optimized"]}</td></tr>'
             html += "</table>"
 
         html += "</div>"
