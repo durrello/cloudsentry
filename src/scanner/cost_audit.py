@@ -45,16 +45,32 @@ def scan_cost(session, config):
 
         # Month-to-date spend
         try:
-            mtd = ce.get_cost_and_usage(
+            # Get gross spend (before credits) - matches billing dashboard
+            mtd_gross = ce.get_cost_and_usage(
+                TimePeriod={"Start": month_start, "End": tomorrow},
+                Granularity="MONTHLY",
+                Metrics=["UnblendedCost"],
+                Filter={"Not": {"Dimensions": {"Key": "RECORD_TYPE", "Values": ["Credit"]}}},
+            )
+            for result in mtd_gross["ResultsByTime"]:
+                for group in result.get("Groups", []):
+                    pass
+                cost_data["month_to_date_gross"] += float(
+                    result["Total"]["UnblendedCost"]["Amount"]
+                )
+
+            # Get net cost (after credits)
+            mtd_net = ce.get_cost_and_usage(
                 TimePeriod={"Start": month_start, "End": tomorrow},
                 Granularity="MONTHLY",
                 Metrics=["UnblendedCost"],
             )
-            for result in mtd["ResultsByTime"]:
-                amount = float(result["Total"]["UnblendedCost"]["Amount"])
-                cost_data["month_to_date"] += amount
+            for result in mtd_net["ResultsByTime"]:
+                cost_data["month_to_date"] += float(
+                    result["Total"]["UnblendedCost"]["Amount"]
+                )
 
-            # Get breakdown by record type (usage, credits, subscriptions)
+            # Get breakdown by record type
             mtd_breakdown = ce.get_cost_and_usage(
                 TimePeriod={"Start": month_start, "End": tomorrow},
                 Granularity="MONTHLY",
@@ -70,40 +86,38 @@ def scan_cost(session, config):
                     elif rtype == "FlatRateSubscription":
                         cost_data["subscriptions_mtd"] = amount
 
-            cost_data["month_to_date_gross"] = cost_data["raw_usage_mtd"] + cost_data["subscriptions_mtd"]
+            # If gross is 0, calculate from components
+            if cost_data["month_to_date_gross"] <= 0:
+                cost_data["month_to_date_gross"] = cost_data["raw_usage_mtd"] + cost_data["subscriptions_mtd"]
+
         except Exception as e:
             logger.error(f"Error getting MTD cost: {e}")
 
         # Last month total
         try:
-            last = ce.get_cost_and_usage(
+            # Gross (before credits) - matches billing dashboard
+            last_gross = ce.get_cost_and_usage(
+                TimePeriod={"Start": last_month_start, "End": last_month_end},
+                Granularity="MONTHLY",
+                Metrics=["UnblendedCost"],
+                Filter={"Not": {"Dimensions": {"Key": "RECORD_TYPE", "Values": ["Credit"]}}},
+            )
+            for result in last_gross["ResultsByTime"]:
+                cost_data["last_month_gross"] += float(
+                    result["Total"]["UnblendedCost"]["Amount"]
+                )
+
+            # Net (after credits)
+            last_net = ce.get_cost_and_usage(
                 TimePeriod={"Start": last_month_start, "End": last_month_end},
                 Granularity="MONTHLY",
                 Metrics=["UnblendedCost"],
             )
-            for result in last["ResultsByTime"]:
+            for result in last_net["ResultsByTime"]:
                 cost_data["last_month"] += float(
                     result["Total"]["UnblendedCost"]["Amount"]
                 )
 
-            # Last month gross (usage + subscriptions)
-            last_breakdown = ce.get_cost_and_usage(
-                TimePeriod={"Start": last_month_start, "End": last_month_end},
-                Granularity="MONTHLY",
-                Metrics=["UnblendedCost"],
-                GroupBy=[{"Type": "DIMENSION", "Key": "RECORD_TYPE"}],
-            )
-            last_usage = 0
-            last_subs = 0
-            for result in last_breakdown["ResultsByTime"]:
-                for group in result.get("Groups", []):
-                    amount = float(group["Metrics"]["UnblendedCost"]["Amount"])
-                    rtype = group["Keys"][0]
-                    if rtype == "Usage":
-                        last_usage = amount
-                    elif rtype == "FlatRateSubscription":
-                        last_subs = amount
-            cost_data["last_month_gross"] = last_usage + last_subs
         except Exception as e:
             logger.error(f"Error getting last month cost: {e}")
 
@@ -125,23 +139,23 @@ def scan_cost(session, config):
                     Granularity="MONTHLY",
                 )
                 remaining_forecast = float(forecast["Total"]["Amount"])
-                cost_data["forecast"] = cost_data["month_to_date"] + remaining_forecast
+                cost_data["forecast"] = cost_data["month_to_date_gross"] + abs(remaining_forecast)
             else:
-                # Too early in the month for forecast, extrapolate
-                if now.day > 0 and cost_data["month_to_date"] > 0:
-                    days_in_month = 30
-                    daily_rate = cost_data["month_to_date"] / now.day
-                    cost_data["forecast"] = daily_rate * days_in_month
+                # Too early in the month, extrapolate from gross
+                if cost_data["month_to_date_gross"] > 0:
+                    daily_rate = cost_data["month_to_date_gross"] / max(now.day, 1)
+                    cost_data["forecast"] = daily_rate * 30
         except Exception as e:
             logger.error(f"Error getting forecast: {e}")
 
-        # Top services by spend (this month)
+        # Top services by spend (this month, excluding credits)
         try:
             by_service = ce.get_cost_and_usage(
                 TimePeriod={"Start": month_start, "End": tomorrow},
                 Granularity="MONTHLY",
                 Metrics=["UnblendedCost"],
                 GroupBy=[{"Type": "DIMENSION", "Key": "SERVICE"}],
+                Filter={"Not": {"Dimensions": {"Key": "RECORD_TYPE", "Values": ["Credit"]}}},
             )
 
             services = []

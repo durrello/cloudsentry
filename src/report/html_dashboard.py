@@ -103,6 +103,7 @@ def render_account_section(acct):
 <h3>Cost</h3>
 <table>
 <tr><td>Month-to-date (gross)</td><td>${cost.get('month_to_date_gross', 0):.2f}</td></tr>
+<tr><td>Forecast (end of month)</td><td>${cost.get('forecast', 0):.2f}</td></tr>
 <tr><td>Last month (gross)</td><td>${cost.get('last_month_gross', 0):.2f}</td></tr>
 <tr><td>Usage</td><td>${cost.get('raw_usage_mtd', 0):.2f}</td></tr>
 <tr><td>Subscriptions (Kiro, etc.)</td><td>${cost.get('subscriptions_mtd', 0):.2f}</td></tr>

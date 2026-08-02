@@ -32,13 +32,9 @@ def store_report(account_report):
         "score": Decimal(str(account_report["score"])),
         "findings_count": len(account_report["findings"]),
         "violations_count": len(account_report["violations"]),
-        "findings_by_severity": json.loads(json.dumps(
-            count_by_severity(account_report["findings"])
-        )),
-        "cost_summary": json.loads(json.dumps(
-            account_report.get("cost", {}),
-            default=str,
-        )),
+        "findings_by_severity": count_by_severity(account_report["findings"]),
+        "cost_mtd_gross": Decimal(str(round(account_report.get("cost", {}).get("month_to_date_gross", 0), 2))),
+        "cost_last_month_gross": Decimal(str(round(account_report.get("cost", {}).get("last_month_gross", 0), 2))),
         "regions": account_report["regions"],
         # TTL: keep reports for 1 year
         "ttl": int(
