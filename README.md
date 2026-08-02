@@ -55,7 +55,7 @@ CloudSentry is a serverless tool that runs weekly (or on-demand) to audit your A
 ## Architecture
 
 ```
-EventBridge (weekly Monday 7am UTC) + API Gateway (on-demand)
+EventBridge (weekly Sunday 7am UTC) + API Gateway (on-demand)
   -> Lambda (Python 3.12, boto3)
       |-- Multi-account: STS AssumeRole into target accounts
       |-- Multi-region: Scans all active regions per account

@@ -30,7 +30,7 @@ variable "slack_webhook_url" {
 variable "schedule_expression" {
   description = "EventBridge cron expression for weekly scan"
   type        = string
-  default     = "cron(0 7 ? * MON *)"
+  default     = "cron(0 7 ? * SUN *)"
 }
 
 variable "accounts" {

@@ -1,7 +1,7 @@
 # EventBridge rule for weekly scheduled scan
 resource "aws_cloudwatch_event_rule" "weekly_scan" {
   name                = "${var.project_name}-weekly-scan"
-  description         = "Triggers CloudSentry scan every Monday at 7am UTC"
+  description         = "Triggers CloudSentry scan every Sunday at 7am UTC"
   schedule_expression = var.schedule_expression
 
   tags = {
