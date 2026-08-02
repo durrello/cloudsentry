@@ -63,7 +63,7 @@ git clone https://github.com/durrello/cloudsentry.git
 cd cloudsentry/terraform
 
 cp terraform.tfvars.example terraform.tfvars
-# Edit: add your email address
+# Edit: add your email addresses
 
 terraform init
 terraform apply
@@ -112,6 +112,55 @@ terraform destroy
 
 One command. Zero leftovers.
 
+### Custom Domain (Optional)
+
+Host the dashboard on your own domain (e.g., `cloudsentry.yourdomain.com`):
+
+```bash
+# 1. Deploy CloudSentry first (creates CloudFront distribution)
+terraform apply
+
+# 2. Request ACM certificate (must be in us-east-1 for CloudFront)
+aws acm request-certificate \
+  --domain-name cloudsentry.yourdomain.com \
+  --validation-method DNS \
+  --region us-east-1
+
+# 3. Get the DNS validation record
+aws acm describe-certificate \
+  --certificate-arn <ARN_FROM_STEP_2> \
+  --region us-east-1 \
+  --query 'Certificate.DomainValidationOptions[0].ResourceRecord'
+
+# 4. Add the CNAME validation record to your DNS provider (Cloudflare, Route53, etc.)
+#    Type: CNAME
+#    Name: _xxx.cloudsentry  (from the output above)
+#    Value: _yyy.acm-validations.aws.  (from the output above)
+#    Proxy: OFF (DNS only if using Cloudflare)
+
+# 5. Wait for cert to validate (1-5 minutes)
+aws acm describe-certificate \
+  --certificate-arn <ARN> \
+  --region us-east-1 \
+  --query 'Certificate.Status'
+# Should return "ISSUED"
+
+# 6. Update terraform.tfvars with the cert ARN and domain
+#    dashboard_domain       = "cloudsentry.yourdomain.com"
+#    dashboard_acm_cert_arn = "arn:aws:acm:us-east-1:123456:certificate/abc-123"
+
+# 7. Apply the update
+terraform apply
+
+# 8. Add CNAME pointing your subdomain to CloudFront
+#    Type: CNAME
+#    Name: cloudsentry
+#    Value: <cloudfront_domain from terraform output>
+#    Proxy: OFF (DNS only if using Cloudflare)
+```
+
+Your dashboard is now live at `https://cloudsentry.yourdomain.com`
+
 ## Configuration
 
 All configuration lives in `terraform.tfvars`. See `terraform.tfvars.example` for the full reference.
@@ -119,9 +168,13 @@ All configuration lives in `terraform.tfvars`. See `terraform.tfvars.example` fo
 ### Key Settings
 
 ```hcl
-# Who gets the reports
-notification_email = "you@example.com"
-slack_webhook_url  = "https://hooks.slack.com/services/..."
+# Who gets the reports (multiple emails supported)
+notification_emails = ["you@example.com", "team@example.com"]
+slack_webhook_url   = "https://hooks.slack.com/services/..."
+
+# Custom domain for the dashboard
+dashboard_domain       = "cloudsentry.yourdomain.com"
+dashboard_acm_cert_arn = "arn:aws:acm:us-east-1:..."
 
 # Accounts to scan (empty = local account only)
 accounts = [

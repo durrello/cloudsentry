@@ -10,9 +10,9 @@ variable "aws_region" {
   default     = "us-east-1"
 }
 
-variable "notification_email" {
-  description = "Email address to receive weekly reports"
-  type        = string
+variable "notification_emails" {
+  description = "Email addresses to receive weekly reports"
+  type        = list(string)
 }
 
 variable "slack_webhook_url" {
@@ -126,4 +126,18 @@ variable "tags" {
     Project   = "cloudsentry"
     ManagedBy = "terraform"
   }
+}
+
+
+# Dashboard / CloudFront
+variable "dashboard_domain" {
+  description = "Custom domain for the dashboard (e.g., cloudsentry.durrellgemuh.com). Leave empty for CloudFront default domain."
+  type        = string
+  default     = ""
+}
+
+variable "dashboard_acm_cert_arn" {
+  description = "ACM certificate ARN for the custom dashboard domain (must be in us-east-1). Leave empty to use Cloudflare SSL."
+  type        = string
+  default     = ""
 }

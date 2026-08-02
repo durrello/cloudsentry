@@ -1,13 +1,57 @@
 # CloudSentry Configuration
 # Copy this file to terraform.tfvars and fill in your values
 
-# Required: where to send reports
-notification_email = "you@example.com"
+# ─────────────────────────────────────────────────────────────────
+# NOTIFICATIONS
+# ─────────────────────────────────────────────────────────────────
+# All emails receive the weekly HTML report. Each must confirm the
+# SNS subscription (check inbox after first deploy).
+notification_emails = [
+  "you@example.com",
+  "team@example.com",
+]
 
-# Optional: Slack webhook for notifications (leave empty to disable)
+# Optional: Slack webhook for short summary notifications
 slack_webhook_url = ""
 
-# Region to deploy CloudSentry infrastructure
+# ─────────────────────────────────────────────────────────────────
+# DASHBOARD (Custom Domain)
+# ─────────────────────────────────────────────────────────────────
+# To use a custom domain (e.g., cloudsentry.yourdomain.com):
+#
+# Step 1: Deploy first with these empty to create CloudFront
+# Step 2: Request ACM cert:
+#   aws acm request-certificate \
+#     --domain-name cloudsentry.yourdomain.com \
+#     --validation-method DNS \
+#     --region us-east-1
+#
+# Step 3: Get the validation CNAME:
+#   aws acm describe-certificate \
+#     --certificate-arn <ARN_FROM_STEP_2> \
+#     --region us-east-1 \
+#     --query 'Certificate.DomainValidationOptions[0].ResourceRecord'
+#
+# Step 4: Add the validation CNAME to your DNS (Cloudflare, Route53, etc.)
+#   Type: CNAME, Name: _xxx.cloudsentry, Value: _yyy.acm-validations.aws.
+#   Proxy: OFF (DNS only)
+#
+# Step 5: Wait for cert to validate (usually 1-5 minutes):
+#   aws acm describe-certificate --certificate-arn <ARN> --query 'Certificate.Status'
+#
+# Step 6: Add these values and run terraform apply:
+dashboard_domain       = ""
+dashboard_acm_cert_arn = ""
+#
+# Step 7: Add CNAME pointing your subdomain to CloudFront:
+#   Type: CNAME, Name: cloudsentry, Value: <cloudfront-domain from terraform output>
+#   Proxy: OFF (DNS only)
+#
+# Your dashboard is now live at https://cloudsentry.yourdomain.com
+
+# ─────────────────────────────────────────────────────────────────
+# AWS REGION
+# ─────────────────────────────────────────────────────────────────
 aws_region = "us-east-1"
 
 # Schedule: when to run the weekly scan (default: Monday 7am UTC)
@@ -19,7 +63,7 @@ aws_region = "us-east-1"
 # Leave empty to scan only the local account (single-account mode).
 # Add entries to scan multiple accounts (multi-account mode).
 #
-# For each target account, first deploy the cross-account role:
+# For each target account, deploy the cross-account role first:
 #   cd cross-account-role/
 #   terraform apply -var="hub_account_id=YOUR_HUB_ACCOUNT_ID"
 
@@ -36,11 +80,6 @@ accounts = []
 #     name       = "Staging"
 #     account_id = "222222222222"
 #     role_arn   = "arn:aws:iam::222222222222:role/CloudSentryAuditRole"
-#   },
-#   {
-#     name       = "Development"
-#     account_id = "333333333333"
-#     role_arn   = "arn:aws:iam::333333333333:role/CloudSentryAuditRole"
 #   },
 # ]
 
@@ -60,11 +99,9 @@ approved_instance_types = ["t3.micro", "t3.small", "t3.medium", "t3.large"]
 # ─────────────────────────────────────────────────────────────────
 # COST POLICY
 # ─────────────────────────────────────────────────────────────────
-# Flag any single resource costing more than this per month
 cost_alert_threshold = 50
 
-# Services excluded from the per-resource cost alert
-# (these are expected to be expensive, tracked via budget caps instead)
+# Services excluded from per-resource cost alerts (tracked via budget caps)
 excluded_services_from_cost_alert = ["AmazonBedrock", "AmazonSageMaker"]
 
 # Budget caps for approved expensive services
@@ -86,5 +123,5 @@ max_access_key_age_days = 90
 # ─────────────────────────────────────────────────────────────────
 # LAMBDA SETTINGS
 # ─────────────────────────────────────────────────────────────────
-# lambda_timeout = 300  # 5 minutes (increase if scanning many accounts)
+# lambda_timeout = 300  # seconds (increase for many accounts/regions)
 # lambda_memory  = 256  # MB

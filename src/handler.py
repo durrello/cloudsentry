@@ -242,16 +242,23 @@ def upload_dashboard(html, scan_date):
 
 
 def send_email(email_body, scan_date):
-    """Send report via SNS email."""
+    """Send report via SNS email (HTML format)."""
     import boto3
 
     sns = boto3.client("sns")
     topic_arn = os.environ["SNS_TOPIC_ARN"]
 
+    # SNS email sends the Message as-is (HTML content)
     sns.publish(
         TopicArn=topic_arn,
         Subject=f"CloudSentry Report - {scan_date}",
         Message=email_body,
+        MessageAttributes={
+            "content-type": {
+                "DataType": "String",
+                "StringValue": "text/html",
+            }
+        },
     )
 
 

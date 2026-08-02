@@ -28,6 +28,16 @@ output "s3_dashboard_bucket" {
   value       = aws_s3_bucket.dashboard.id
 }
 
+output "dashboard_url" {
+  description = "CloudFront URL for the HTML dashboard"
+  value       = "https://${aws_cloudfront_distribution.dashboard.domain_name}"
+}
+
+output "dashboard_cloudfront_domain" {
+  description = "CloudFront domain name (point your CNAME here)"
+  value       = aws_cloudfront_distribution.dashboard.domain_name
+}
+
 output "eventbridge_rule" {
   description = "EventBridge rule for weekly scan schedule"
   value       = aws_cloudwatch_event_rule.weekly_scan.name
