@@ -4,6 +4,7 @@ Handles both single-account and multi-account modes.
 """
 
 import logging
+import os
 import boto3
 
 logger = logging.getLogger(__name__)
@@ -28,9 +29,19 @@ def get_sessions(config):
         identity = sts.get_caller_identity()
         account_id = identity["Account"]
 
-        logger.info(f"Single account mode: scanning local account {account_id}")
+        # Use configured account name or try to get account alias
+        account_name = os.environ.get("ACCOUNT_NAME", "")
+        if not account_name:
+            try:
+                iam = session.client("iam")
+                aliases = iam.list_account_aliases()["AccountAliases"]
+                account_name = aliases[0] if aliases else f"Account {account_id}"
+            except Exception:
+                account_name = f"Account {account_id}"
+
+        logger.info(f"Single account mode: scanning {account_name} ({account_id})")
         sessions.append({
-            "name": "Local",
+            "name": account_name,
             "account_id": account_id,
             "session": session,
         })

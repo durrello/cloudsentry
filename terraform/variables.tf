@@ -4,6 +4,12 @@ variable "project_name" {
   default     = "cloudsentry"
 }
 
+variable "account_name" {
+  description = "Display name for the local account (shown in reports)"
+  type        = string
+  default     = "Primary"
+}
+
 variable "aws_region" {
   description = "AWS region to deploy CloudSentry infrastructure"
   type        = string

@@ -19,6 +19,7 @@ resource "aws_lambda_function" "scanner" {
 
   environment {
     variables = {
+      ACCOUNT_NAME                      = var.account_name
       DYNAMODB_TABLE                    = aws_dynamodb_table.history.name
       SNS_TOPIC_ARN                     = aws_sns_topic.notifications.arn
       S3_BUCKET                         = aws_s3_bucket.dashboard.id

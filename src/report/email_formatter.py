@@ -98,13 +98,21 @@ body {{ margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, '
 
         # Cost section
         cost = acct.get("cost", {})
-        if cost.get("month_to_date"):
+        if cost.get("month_to_date") or cost.get("last_month"):
             html += '<div class="section-title">Cost</div>'
-            html += f'<div class="cost-row"><span class="cost-label">Month-to-date</span><span class="cost-value">${cost["month_to_date"]:.2f}</span></div>'
+            html += f'<div class="cost-row"><span class="cost-label">Month-to-date</span><span class="cost-value">${cost.get("month_to_date", 0):.2f}</span></div>'
             if cost.get("forecast"):
                 html += f'<div class="cost-row"><span class="cost-label">Forecast</span><span class="cost-value">${cost["forecast"]:.2f}</span></div>'
             if cost.get("last_month"):
                 html += f'<div class="cost-row"><span class="cost-label">Last month</span><span class="cost-value">${cost["last_month"]:.2f}</span></div>'
+
+            # Burn rate
+            burn = cost.get("burn_rate", {})
+            if burn.get("daily_rate", 0) > 0:
+                html += f'<div class="cost-row"><span class="cost-label">Daily burn</span><span class="cost-value">${burn["daily_rate"]:.2f}/day</span></div>'
+                html += f'<div class="cost-row"><span class="cost-label">Annual rate</span><span class="cost-value">${burn["annual_rate"]:.2f}/year</span></div>'
+                if burn.get("potential_monthly_savings", 0) > 0:
+                    html += f'<div class="cost-row"><span class="cost-label">Savings if fixed</span><span class="cost-value" style="color:#4ade80">-${burn["potential_monthly_savings"]:.2f}/mo</span></div>'
 
             # Top services
             if cost.get("top_services"):

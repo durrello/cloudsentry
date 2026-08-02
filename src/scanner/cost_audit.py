@@ -1,6 +1,6 @@
 """
 Cost Intelligence Scanner.
-Checks current spend, forecast, and identifies cost anomalies.
+Checks current spend, forecast, credits, and calculates burn rate.
 """
 
 import logging
@@ -20,39 +20,41 @@ def scan_cost(session, config):
         "top_services": [],
         "by_service": {},
         "budget_status": [],
+        "credits": {},
+        "burn_rate": {},
     }
 
     try:
         ce = session.client("ce", region_name="us-east-1")
         now = datetime.now(timezone.utc)
 
-        # Current month start
+        # Current month date range
         month_start = now.strftime("%Y-%m-01")
-        today = now.strftime("%Y-%m-%d")
+        # End date must be today + 1 for Cost Explorer (exclusive end)
+        tomorrow = (now + timedelta(days=1)).strftime("%Y-%m-%d")
 
-        # Last month
-        last_month_end = (now.replace(day=1) - timedelta(days=1))
-        last_month_start = last_month_end.strftime("%Y-%m-01")
-        last_month_end_str = last_month_end.strftime("%Y-%m-%d")
+        # Last month date range
+        first_of_month = now.replace(day=1)
+        last_month_end = first_of_month.strftime("%Y-%m-%d")
+        last_month_start = (first_of_month - timedelta(days=1)).replace(day=1).strftime("%Y-%m-%d")
 
         # Month-to-date spend
         try:
             mtd = ce.get_cost_and_usage(
-                TimePeriod={"Start": month_start, "End": today},
+                TimePeriod={"Start": month_start, "End": tomorrow},
                 Granularity="MONTHLY",
                 Metrics=["UnblendedCost"],
             )
             for result in mtd["ResultsByTime"]:
-                cost_data["month_to_date"] += float(
-                    result["Total"]["UnblendedCost"]["Amount"]
-                )
+                amount = float(result["Total"]["UnblendedCost"]["Amount"])
+                cost_data["month_to_date"] += amount
         except Exception as e:
             logger.error(f"Error getting MTD cost: {e}")
 
         # Last month total
         try:
             last = ce.get_cost_and_usage(
-                TimePeriod={"Start": last_month_start, "End": month_start},
+                TimePeriod={"Start": last_month_start, "End": last_month_end},
                 Granularity="MONTHLY",
                 Metrics=["UnblendedCost"],
             )
@@ -63,26 +65,38 @@ def scan_cost(session, config):
         except Exception as e:
             logger.error(f"Error getting last month cost: {e}")
 
-        # Forecast
+        # Forecast (need at least a few days of data)
         try:
-            # Only forecast if we're past day 3 (need data points)
-            if now.day > 3:
-                month_end = (now.replace(day=28) + timedelta(days=4)).replace(day=1)
+            if now.day >= 3:
+                # Calculate end of month
+                if now.month == 12:
+                    month_end = now.replace(year=now.year + 1, month=1, day=1)
+                else:
+                    month_end = now.replace(month=now.month + 1, day=1)
+
                 forecast = ce.get_cost_forecast(
-                    TimePeriod={"Start": today, "End": month_end.strftime("%Y-%m-%d")},
+                    TimePeriod={
+                        "Start": tomorrow,
+                        "End": month_end.strftime("%Y-%m-%d"),
+                    },
                     Metric="UNBLENDED_COST",
                     Granularity="MONTHLY",
                 )
-                cost_data["forecast"] = cost_data["month_to_date"] + float(
-                    forecast["Total"]["Amount"]
-                )
+                remaining_forecast = float(forecast["Total"]["Amount"])
+                cost_data["forecast"] = cost_data["month_to_date"] + remaining_forecast
+            else:
+                # Too early in the month for forecast, extrapolate
+                if now.day > 0 and cost_data["month_to_date"] > 0:
+                    days_in_month = 30
+                    daily_rate = cost_data["month_to_date"] / now.day
+                    cost_data["forecast"] = daily_rate * days_in_month
         except Exception as e:
             logger.error(f"Error getting forecast: {e}")
 
-        # Top services by spend
+        # Top services by spend (this month)
         try:
             by_service = ce.get_cost_and_usage(
-                TimePeriod={"Start": month_start, "End": today},
+                TimePeriod={"Start": month_start, "End": tomorrow},
                 Granularity="MONTHLY",
                 Metrics=["UnblendedCost"],
                 GroupBy=[{"Type": "DIMENSION", "Key": "SERVICE"}],
@@ -93,7 +107,7 @@ def scan_cost(session, config):
                 for group in result.get("Groups", []):
                     service_name = group["Keys"][0]
                     amount = float(group["Metrics"]["UnblendedCost"]["Amount"])
-                    if amount > 0.01:
+                    if amount > 0.001:
                         services.append({"service": service_name, "amount": amount})
 
             services.sort(key=lambda x: x["amount"], reverse=True)
@@ -116,7 +130,114 @@ def scan_cost(session, config):
                 "status": "over" if percentage > 100 else "warning" if percentage > 80 else "ok",
             })
 
+        # Credits and balance
+        cost_data["credits"] = get_credits_info(ce, now)
+
+        # Burn rate calculation
+        cost_data["burn_rate"] = calculate_burn_rate(cost_data, now)
+
     except Exception as e:
         logger.error(f"Error in cost scan: {e}")
 
     return cost_data
+
+
+def get_credits_info(ce, now):
+    """Get AWS credits and balance information."""
+    credits_info = {
+        "total_credits": 0.0,
+        "credits_used": 0.0,
+        "credits_remaining": 0.0,
+        "has_credits": False,
+    }
+
+    try:
+        # Get credits usage for current month
+        month_start = now.strftime("%Y-%m-01")
+        tomorrow = (now + timedelta(days=1)).strftime("%Y-%m-%d")
+
+        # Check for credits by looking at the Credits metric
+        credits_result = ce.get_cost_and_usage(
+            TimePeriod={"Start": month_start, "End": tomorrow},
+            Granularity="MONTHLY",
+            Metrics=["UnblendedCost"],
+            GroupBy=[{"Type": "DIMENSION", "Key": "RECORD_TYPE"}],
+        )
+
+        for result in credits_result["ResultsByTime"]:
+            for group in result.get("Groups", []):
+                record_type = group["Keys"][0]
+                amount = float(group["Metrics"]["UnblendedCost"]["Amount"])
+                if record_type == "Credit":
+                    credits_info["credits_used"] = abs(amount)
+                    credits_info["has_credits"] = True
+
+        # Try to get total credits from a longer lookback
+        try:
+            year_start = f"{now.year}-01-01"
+            credits_yearly = ce.get_cost_and_usage(
+                TimePeriod={"Start": year_start, "End": tomorrow},
+                Granularity="MONTHLY",
+                Metrics=["UnblendedCost"],
+                GroupBy=[{"Type": "DIMENSION", "Key": "RECORD_TYPE"}],
+            )
+
+            total_credits_used = 0.0
+            for result in credits_yearly["ResultsByTime"]:
+                for group in result.get("Groups", []):
+                    if group["Keys"][0] == "Credit":
+                        total_credits_used += abs(float(group["Metrics"]["UnblendedCost"]["Amount"]))
+
+            credits_info["total_credits"] = total_credits_used
+        except Exception:
+            pass
+
+    except Exception as e:
+        logger.error(f"Error getting credits info: {e}")
+
+    return credits_info
+
+
+def calculate_burn_rate(cost_data, now):
+    """Calculate burn rate and time estimates."""
+    burn_rate = {
+        "daily_rate": 0.0,
+        "monthly_rate": 0.0,
+        "annual_rate": 0.0,
+        "days_until_credits_expire": None,
+        "potential_monthly_savings": 0.0,
+        "optimized_monthly_rate": 0.0,
+        "optimized_annual_rate": 0.0,
+    }
+
+    # Calculate daily burn rate from MTD
+    mtd = cost_data.get("month_to_date", 0)
+    days_elapsed = max(now.day, 1)
+
+    if mtd > 0:
+        burn_rate["daily_rate"] = mtd / days_elapsed
+        burn_rate["monthly_rate"] = burn_rate["daily_rate"] * 30
+        burn_rate["annual_rate"] = burn_rate["daily_rate"] * 365
+
+    # Estimate potential savings from waste findings
+    # (EIPs cost $3.60/mo, idle LBs ~$16/mo, unattached volumes vary)
+    # This is a rough estimate based on common waste patterns
+    waste_savings = 0.0
+    # Count from budget_status (things over budget could be optimized)
+    for budget in cost_data.get("budget_status", []):
+        if budget["status"] == "over":
+            overage = budget["spend"] - budget["cap"]
+            waste_savings += overage
+
+    burn_rate["potential_monthly_savings"] = waste_savings
+    burn_rate["optimized_monthly_rate"] = max(0, burn_rate["monthly_rate"] - waste_savings)
+    burn_rate["optimized_annual_rate"] = burn_rate["optimized_monthly_rate"] * 12
+
+    # Credits runway
+    credits = cost_data.get("credits", {})
+    if credits.get("has_credits") and burn_rate["daily_rate"] > 0:
+        remaining = credits.get("credits_remaining", 0)
+        if remaining > 0:
+            burn_rate["days_until_credits_expire"] = int(remaining / burn_rate["daily_rate"])
+
+    return burn_rate

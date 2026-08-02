@@ -97,17 +97,46 @@ def render_account_section(acct):
 
     # Cost section
     cost = acct.get("cost", {})
-    if cost.get("month_to_date"):
+    if cost.get("month_to_date") or cost.get("last_month"):
         html += f"""
 <div class="section">
 <h3>Cost</h3>
 <table>
-<tr><td>Month-to-date</td><td>${cost['month_to_date']:.2f}</td></tr>
-<tr><td>Forecast</td><td>${cost.get('forecast', 0):.2f}</td></tr>
-<tr><td>Last month</td><td>${cost.get('last_month', 0):.2f}</td></tr>
+<tr><td>Month-to-date</td><td>${cost.get('month_to_date', 0):.2f}</td></tr>
+<tr><td>Forecast (end of month)</td><td>${cost.get('forecast', 0):.2f}</td></tr>
+<tr><td>Last month total</td><td>${cost.get('last_month', 0):.2f}</td></tr>
 </table>
-</div>
 """
+        # Burn rate
+        burn = cost.get("burn_rate", {})
+        if burn.get("daily_rate", 0) > 0:
+            html += f"""
+<h4 style="color:#94a3b8;margin-top:12px;">Burn Rate</h4>
+<table>
+<tr><td>Daily rate</td><td>${burn['daily_rate']:.2f}/day</td></tr>
+<tr><td>Monthly rate (current)</td><td>${burn['monthly_rate']:.2f}/month</td></tr>
+<tr><td>Annual rate (current)</td><td>${burn['annual_rate']:.2f}/year</td></tr>
+"""
+            if burn.get("potential_monthly_savings", 0) > 0:
+                html += f"""<tr><td>Potential savings (if all fixes applied)</td><td style="color:#4ade80">-${burn['potential_monthly_savings']:.2f}/month</td></tr>
+<tr><td>Optimized monthly rate</td><td style="color:#4ade80">${burn['optimized_monthly_rate']:.2f}/month</td></tr>
+<tr><td>Optimized annual rate</td><td style="color:#4ade80">${burn['optimized_annual_rate']:.2f}/year</td></tr>
+"""
+            html += "</table>"
+
+        # Credits
+        credits = cost.get("credits", {})
+        if credits.get("has_credits"):
+            html += f"""
+<h4 style="color:#94a3b8;margin-top:12px;">Credits</h4>
+<table>
+<tr><td>Credits used (this year)</td><td>${credits.get('total_credits', 0):.2f}</td></tr>
+"""
+            if burn.get("days_until_credits_expire") is not None:
+                html += f"<tr><td>Estimated days until credits run out</td><td>{burn['days_until_credits_expire']} days</td></tr>"
+            html += "</table>"
+
+        html += "</div>"
 
     # Findings
     findings = acct.get("findings", [])
