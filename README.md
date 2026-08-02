@@ -6,20 +6,51 @@ CloudSentry is a serverless tool that runs weekly (or on-demand) to audit your A
 
 ## Features
 
-- **Multi-region active services inventory**: See everything running across all regions, grouped by region
-- **Full security audit**: IAM, VPCs, security groups, NACLs, internet gateways, NAT gateways, Elastic IPs, load balancers, EC2, Lambda, S3, RDS, DynamoDB, KMS, Secrets Manager, CloudTrail, Route 53
-- **Policy violations**: Tag compliance, naming conventions, lifecycle, cost, architecture, access
-- **Security score**: 0-100 weighted score with CIS Benchmark mapping
-- **Cost intelligence**: Spend, forecast, anomalies, budget cap tracking for approved expensive services
-- **Resource waste detection**: Orphaned volumes, idle instances, unused functions, unattached EIPs
-- **Prioritized action plan**: Every finding includes risk explanation, fix commands, compliance mapping, and effort estimate
-- **Multi-account support**: Scan unlimited accounts from a single hub via STS AssumeRole
-- **Week-over-week trends**: Track security score, cost trajectory, and findings over time
-- **Email digest**: Formatted HTML report via SNS
-- **Slack notifications**: Summary with link to full dashboard
-- **On-demand scan**: API Gateway endpoint for instant scans after deployments
-- **S3 HTML dashboard**: Historical charts and full report archive
-- **Infrastructure drift detection**: Finds resources created outside Terraform/IaC
+### Security Audit
+- **IAM**: Root account MFA, access key age, password policy, users without MFA, inline policies, orphaned users, over-privileged roles, empty groups, unused policies
+- **Networking**: VPCs without flow logs, security groups open to 0.0.0.0/0, risky ports (SSH, RDP, DB ports), NACLs, orphaned security groups, VPC peering
+- **Load Balancers**: HTTP-only (no HTTPS), unhealthy targets, no access logging, outdated TLS
+- **Compute**: EC2 with public IPs, IMDSv1 enabled, no IAM role, default security group, stopped instances, unapproved instance types
+- **Storage**: S3 public access, no encryption, no versioning, no lifecycle policy, no logging
+- **Databases**: RDS publicly accessible, unencrypted, no backups, no multi-AZ, DynamoDB without PITR
+- **Encryption**: KMS wildcard policies, keys pending deletion, unrotated secrets
+- **Logging**: CloudTrail disabled, no multi-region trail, log validation off, GuardDuty disabled
+- **DNS**: Dangling CNAMEs (subdomain takeover risk), expiring ACM certificates
+
+### Cost Intelligence
+- **Gross spend**: Usage + subscriptions (matches your billing dashboard)
+- **Service breakdown**: Cost per AWS service
+- **Burn rate**: Daily, monthly, and annual rates
+- **Credits tracking**: Total applied, this month, last month, coverage percentage
+- **All data pulled from AWS APIs**: No hardcoded values or assumptions
+
+### Policy Violations
+- **Tag compliance**: Configurable required tags with allowed values
+- **Naming conventions**: Flags auto-generated names (launch-wizard, etc.)
+- **Lifecycle**: Old snapshots, stale sandbox resources
+- **Cost policy**: Per-resource thresholds with exclusions for approved expensive services
+- **Architecture**: Resources in unapproved regions, over-provisioned Lambda
+- **Access**: Cross-account role trusts, unused credentials
+
+### Infrastructure Drift
+- Detects EC2 instances and security groups created outside Terraform/CloudFormation
+- Flags resources missing the ManagedBy tag
+- Provides terraform import commands
+
+### Reporting
+- **Security score**: 0-100 weighted score based on findings
+- **Prioritized action plan**: Fix commands grouped by severity (Critical, High, Medium, Low)
+- **HTML dashboard**: Dark-themed, hosted on CloudFront with custom domain support
+- **Email notifications**: Styled HTML emails via SES (falls back to SNS plain text)
+- **Slack notifications**: Summary with link to dashboard
+- **Week-over-week trends**: Stored in DynamoDB for historical comparison
+- **Multi-account comparison**: Score and spend side by side
+
+### Infrastructure
+- **Multi-account**: Scan unlimited accounts via STS AssumeRole
+- **Multi-region**: Automatically discovers and scans all active regions
+- **On-demand scan**: API Gateway endpoint for instant scans
+- **Terraform managed**: One command to deploy, one command to destroy
 
 ## Architecture
 
@@ -30,14 +61,13 @@ EventBridge (weekly Monday 7am UTC) + API Gateway (on-demand)
       |-- Multi-region: Scans all active regions per account
       |-- Scanners: IAM, Network, Compute, Storage, DB, DNS, Logging, Cost
       |-- Violations: Tags, Naming, Lifecycle, Cost, Architecture, Access
-      |-- Scoring: Weighted security score (0-100) with CIS mapping
+      |-- Drift: Detects resources outside IaC
+      |-- Scoring: Weighted security score (0-100)
       |-- Remediation: Fix commands + explanations for every finding
-      |-- Drift: Detects resources created outside IaC
-      |-- Report: Compiles all sections into digest
       |-- DynamoDB: Stores history for week-over-week trends
-      |-- SNS: Sends HTML email digest
+      |-- SES/SNS: Sends HTML email digest
       |-- Slack: Sends summary notification via webhook
-      |-- S3: Publishes full HTML dashboard
+      |-- S3 + CloudFront: Publishes full HTML dashboard
 ```
 
 ## Cost
@@ -48,8 +78,10 @@ EventBridge (weekly Monday 7am UTC) + API Gateway (on-demand)
 | EventBridge | $0.00 (always free) |
 | DynamoDB | $0.00 (always free: 25GB) |
 | SNS | $0.00 (always free: 1,000 emails/month) |
+| SES | $0.00 (first 62,000 emails/month from Lambda) |
 | CloudWatch Logs | $0.00 (always free: 5GB) |
 | S3 | ~$0.01 |
+| CloudFront | ~$0.00 (minimal traffic) |
 | API Gateway | ~$0.00 |
 | Cost Explorer API | ~$0.20 |
 | **Total** | **~$0.21/month ($2.52/year)** |
@@ -63,7 +95,7 @@ git clone https://github.com/durrello/cloudsentry.git
 cd cloudsentry/terraform
 
 cp terraform.tfvars.example terraform.tfvars
-# Edit: add your email addresses
+# Edit: add your email addresses and account name
 
 terraform init
 terraform apply
@@ -82,7 +114,7 @@ terraform apply -var="hub_account_id=YOUR_HUB_ACCOUNT_ID"
 # 2. Deploy CloudSentry in your hub account
 cd ../
 cp terraform.tfvars.example terraform.tfvars
-# Edit: add account list, email, slack webhook
+# Edit: add account list, emails, slack webhook
 
 terraform init
 terraform apply
@@ -91,7 +123,7 @@ terraform apply
 ### Run Immediately
 
 ```bash
-aws lambda invoke --function-name cloudsentry-scanner --payload '{}' /dev/stdout
+aws lambda invoke --function-name cloudsentry-scanner --payload '{}' /dev/stdout --cli-read-timeout 300
 ```
 
 ### On-Demand Scan via API
@@ -147,7 +179,7 @@ aws acm describe-certificate \
 
 # 6. Update terraform.tfvars with the cert ARN and domain
 #    dashboard_domain       = "cloudsentry.yourdomain.com"
-#    dashboard_acm_cert_arn = "arn:aws:acm:us-east-1:123456:certificate/abc-123"
+#    dashboard_acm_cert_arn = "arn:aws:acm:us-east-1:..."
 
 # 7. Apply the update
 terraform apply
@@ -155,11 +187,29 @@ terraform apply
 # 8. Add CNAME pointing your subdomain to CloudFront
 #    Type: CNAME
 #    Name: cloudsentry
-#    Value: <cloudfront_domain from terraform output>
+#    Value: <dashboard_cloudfront_domain from terraform output>
 #    Proxy: OFF (DNS only if using Cloudflare)
 ```
 
 Your dashboard is now live at `https://cloudsentry.yourdomain.com`
+
+### Email Setup (HTML emails via SES)
+
+CloudSentry sends styled HTML emails via AWS SES. Each recipient email must be verified:
+
+```bash
+# Verify each email address
+aws ses verify-email-identity --email-address you@example.com --region us-east-1
+aws ses verify-email-identity --email-address team@example.com --region us-east-1
+
+# Check verification status
+aws ses get-identity-verification-attributes \
+  --identities you@example.com --region us-east-1
+```
+
+Click the verification link in each inbox. SES in sandbox mode only sends to verified addresses (which is fine for personal/team use).
+
+If SES fails (unverified emails), CloudSentry falls back to SNS plain-text notifications with a link to the dashboard.
 
 ## Configuration
 
@@ -172,6 +222,9 @@ All configuration lives in `terraform.tfvars`. See `terraform.tfvars.example` fo
 notification_emails = ["you@example.com", "team@example.com"]
 slack_webhook_url   = "https://hooks.slack.com/services/..."
 
+# Display name for the account in reports
+account_name = "My Company"
+
 # Custom domain for the dashboard
 dashboard_domain       = "cloudsentry.yourdomain.com"
 dashboard_acm_cert_arn = "arn:aws:acm:us-east-1:..."
@@ -182,11 +235,6 @@ accounts = [
     name       = "Production"
     account_id = "111111111111"
     role_arn   = "arn:aws:iam::111111111111:role/CloudSentryAuditRole"
-  },
-  {
-    name       = "Staging"
-    account_id = "222222222222"
-    role_arn   = "arn:aws:iam::222222222222:role/CloudSentryAuditRole"
   },
 ]
 
@@ -205,20 +253,15 @@ budget_caps = [
 approved_regions = ["us-east-1", "eu-west-1", "af-south-1"]
 ```
 
-## Report Output
-
-CloudSentry generates a comprehensive report with these sections:
+## Report Sections
 
 1. **Account Overview**: All active services by region
-2. **Security Score**: 0-100 with deduction breakdown
-3. **Security Audit**: Full findings across all services
-4. **Policy Violations**: Tag compliance, naming, lifecycle, cost, architecture
-5. **Cost Intelligence**: Spend, forecast, budget cap tracking
-6. **Resource Waste**: Idle/orphaned resources with savings estimate
-7. **Infrastructure Drift**: Resources outside IaC
-8. **Action Plan**: Prioritized fixes grouped by severity (Critical, High, Medium, Low)
-9. **Multi-Account Comparison**: Score and spend per account
-10. **Trends**: Week-over-week charts
+2. **Security Score**: 0-100 with grade (A-F)
+3. **Cost Intelligence**: Gross spend, usage, subscriptions, credits, burn rate, service breakdown
+4. **Security Findings**: Full audit results across all services
+5. **Policy Violations**: Tags, naming, lifecycle, cost, architecture, access
+6. **Infrastructure Drift**: Resources outside IaC
+7. **Action Plan**: Prioritized fixes with commands, compliance mapping, effort estimates
 
 ## How It Scores
 
@@ -232,6 +275,66 @@ Security score starts at 100 and deducts points per finding:
 | Low | -1 | Unused functions, orphaned resources |
 
 Minimum score is 0. Findings are mapped to CIS AWS Foundations Benchmark where applicable.
+
+## Project Structure
+
+```
+cloudsentry/
+├── README.md
+├── LICENSE
+├── .gitignore
+├── terraform/
+│   ├── main.tf
+│   ├── variables.tf
+│   ├── outputs.tf
+│   ├── lambda.tf
+│   ├── eventbridge.tf
+│   ├── dynamodb.tf
+│   ├── apigateway.tf
+│   ├── s3.tf
+│   ├── sns.tf
+│   ├── cloudfront.tf
+│   ├── terraform.tfvars.example
+│   └── cross-account-role/
+│       └── main.tf
+└── src/
+    ├── handler.py
+    ├── config.py
+    ├── scanner/
+    │   ├── inventory.py
+    │   ├── iam_audit.py
+    │   ├── network_audit.py
+    │   ├── compute_audit.py
+    │   ├── storage_audit.py
+    │   ├── database_audit.py
+    │   ├── dns_audit.py
+    │   ├── encryption_audit.py
+    │   ├── logging_audit.py
+    │   ├── cost_audit.py
+    │   └── drift_detection.py
+    ├── violations/
+    │   ├── tag_compliance.py
+    │   ├── naming_policy.py
+    │   ├── lifecycle_policy.py
+    │   ├── cost_policy.py
+    │   ├── architecture_policy.py
+    │   └── access_policy.py
+    ├── scoring/
+    │   ├── calculator.py
+    │   └── weights.py
+    ├── remediation/
+    │   └── actions.py
+    ├── report/
+    │   ├── builder.py
+    │   ├── email_formatter.py
+    │   ├── html_dashboard.py
+    │   └── slack_formatter.py
+    └── utils/
+        ├── multi_account.py
+        ├── regions.py
+        ├── findings.py
+        └── dynamo.py
+```
 
 ## Future Roadmap
 
@@ -250,3 +353,7 @@ Contributions welcome. Please open an issue first to discuss what you'd like to 
 ## License
 
 MIT
+
+## Author
+
+Built by [Durrell Gemuh](https://durrellgemuh.com)
