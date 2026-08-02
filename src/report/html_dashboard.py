@@ -97,7 +97,7 @@ def render_account_section(acct):
 
     # Cost section
     cost = acct.get("cost", {})
-    if cost.get("month_to_date") or cost.get("last_month"):
+    if cost or True:  # Always show cost section
         html += f"""
 <div class="section">
 <h3>Cost</h3>
@@ -119,7 +119,8 @@ def render_account_section(acct):
 
         # Burn rate
         burn = cost.get("burn_rate", {})
-        if burn.get("daily_rate", 0) > 0:
+        daily_rate = burn.get("daily_rate", 0)
+        if daily_rate > 0:
             html += f"""
 <h4 style="color:#94a3b8;margin-top:12px;">Burn Rate</h4>
 <table>

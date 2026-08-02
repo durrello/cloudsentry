@@ -49,6 +49,18 @@ def scan_cost(session, config):
             for result in mtd["ResultsByTime"]:
                 amount = float(result["Total"]["UnblendedCost"]["Amount"])
                 cost_data["month_to_date"] += amount
+
+            # Also get raw usage (before credits) for burn rate
+            mtd_usage = ce.get_cost_and_usage(
+                TimePeriod={"Start": month_start, "End": tomorrow},
+                Granularity="MONTHLY",
+                Metrics=["UnblendedCost"],
+                GroupBy=[{"Type": "DIMENSION", "Key": "RECORD_TYPE"}],
+            )
+            for result in mtd_usage["ResultsByTime"]:
+                for group in result.get("Groups", []):
+                    if group["Keys"][0] == "Usage":
+                        cost_data["raw_usage_mtd"] = float(group["Metrics"]["UnblendedCost"]["Amount"])
         except Exception as e:
             logger.error(f"Error getting MTD cost: {e}")
 
@@ -207,18 +219,21 @@ def calculate_burn_rate(cost_data, now):
         "optimized_annual_rate": 0.0,
     }
 
-    # Calculate daily burn rate from MTD
+    # Calculate daily burn rate from raw usage (before credits offset)
+    raw_usage = cost_data.get("raw_usage_mtd", 0)
     mtd = cost_data.get("month_to_date", 0)
     days_elapsed = max(now.day, 1)
 
-    # Use last month if MTD is too low (early in month)
+    # Prefer raw usage (actual spend before credits)
+    # Fall back to last month if early in month
     last_month = cost_data.get("last_month", 0)
-    if mtd <= 0 and last_month > 0:
-        burn_rate["daily_rate"] = last_month / 30
-    elif mtd > 0:
-        burn_rate["daily_rate"] = mtd / days_elapsed
+    
+    effective_spend = raw_usage if raw_usage > 0 else abs(mtd) if mtd != 0 else 0
+    
+    if effective_spend > 0:
+        burn_rate["daily_rate"] = effective_spend / days_elapsed
     elif last_month > 0:
-        burn_rate["daily_rate"] = last_month / 30
+        burn_rate["daily_rate"] = abs(last_month) / 30
 
     if burn_rate["daily_rate"] > 0:
         burn_rate["monthly_rate"] = burn_rate["daily_rate"] * 30
