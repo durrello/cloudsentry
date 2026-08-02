@@ -95,13 +95,14 @@ git clone https://github.com/durrello/cloudsentry.git
 cd cloudsentry/terraform
 
 cp terraform.tfvars.example terraform.tfvars
-# Edit: add your email addresses and account name
+# Edit: set notification_emails and account_name
 
 terraform init
 terraform apply
+# Check your inbox and click the SES verification link(s)
 ```
 
-That's it. CloudSentry scans the account it's deployed in.
+That's it. One command deploys everything. SES verification emails are sent automatically during deploy.
 
 ### Multi-Account
 
@@ -195,21 +196,18 @@ Your dashboard is now live at `https://cloudsentry.yourdomain.com`
 
 ### Email Setup (HTML emails via SES)
 
-CloudSentry sends styled HTML emails via AWS SES. Each recipient email must be verified:
+SES verification emails are sent automatically during `terraform apply`. Just click the verification link in each inbox. Once verified, you'll receive styled HTML reports.
+
+If any email isn't verified, CloudSentry falls back to SNS plain-text notifications with a link to the dashboard.
+
+To check verification status:
 
 ```bash
-# Verify each email address
-aws ses verify-email-identity --email-address you@example.com --region us-east-1
-aws ses verify-email-identity --email-address team@example.com --region us-east-1
-
-# Check verification status
 aws ses get-identity-verification-attributes \
   --identities you@example.com --region us-east-1
 ```
 
-Click the verification link in each inbox. SES in sandbox mode only sends to verified addresses (which is fine for personal/team use).
-
-If SES fails (unverified emails), CloudSentry falls back to SNS plain-text notifications with a link to the dashboard.
+Note: SES in sandbox mode only sends to verified addresses (fine for personal/team use).
 
 ## Configuration
 
@@ -293,6 +291,7 @@ cloudsentry/
 │   ├── apigateway.tf
 │   ├── s3.tf
 │   ├── sns.tf
+│   ├── ses.tf
 │   ├── cloudfront.tf
 │   ├── terraform.tfvars.example
 │   └── cross-account-role/
