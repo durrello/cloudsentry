@@ -96,13 +96,13 @@ def get_score_breakdown(findings, violations):
 
 def get_score_grade(score):
     """Convert numeric score to letter grade."""
-    if score >= 90:
+    if score >= 85:
         return "A"
-    elif score >= 80:
-        return "B"
     elif score >= 70:
+        return "B"
+    elif score >= 50:
         return "C"
-    elif score >= 60:
+    elif score >= 35:
         return "D"
     else:
         return "F"
