@@ -113,10 +113,11 @@ def check_s3_buckets(s3):
             except Exception:
                 pass
 
-            # Check logging
+            # Check logging (skip log buckets themselves to avoid circular logging)
             try:
                 logging_config = s3.get_bucket_logging(Bucket=bucket_name)
-                if not logging_config.get("LoggingEnabled"):
+                is_log_bucket = "access-logs" in bucket_name or "log" in bucket_name.lower()
+                if not logging_config.get("LoggingEnabled") and not is_log_bucket:
                     findings.append(create_finding(
                         title=f"S3 bucket '{bucket_name}' has no access logging",
                         severity="low",
