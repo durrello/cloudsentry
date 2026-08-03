@@ -85,12 +85,59 @@ def check_tag_compliance(inventory, config):
                     )
                 )
 
-    # Check global resources (S3 buckets)
-    s3_data = inventory.get("global", {}).get("s3", {})
-    for bucket in s3_data.get("bucket_details", []):
-        if isinstance(bucket, dict):
-            # S3 buckets don't have tags in the listing, flag them for review
-            pass
+        # Lambda Functions
+        lambda_data = resources.get("lambda", {})
+        for func in lambda_data.get("details", []):
+            if isinstance(func, dict):
+                # Lambda tags come from the list, check if present
+                func_name = func.get("name", "unknown")
+                # We don't have tags in inventory listing, skip for now
+                pass
+
+        # RDS Instances
+        rds_data = resources.get("rds", {})
+        for db in rds_data.get("details", []):
+            if isinstance(db, dict):
+                tags = db.get("tags", {})
+                resource_id = db.get("id", "unknown")
+                if tags:  # Only check if we have tag data
+                    violations.extend(
+                        check_resource_tags(
+                            tags, required_tags, valid_envs, valid_managed_by,
+                            "RDS Instance", resource_id, region
+                        )
+                    )
+
+        # NAT Gateways
+        nat_data = resources.get("nat_gateways", {})
+        for nat in nat_data.get("details", []):
+            if isinstance(nat, dict):
+                tags = nat.get("tags", {})
+                resource_id = nat.get("id", "unknown")
+                if tags is not None:
+                    violations.extend(
+                        check_resource_tags(
+                            tags, required_tags, valid_envs, valid_managed_by,
+                            "NAT Gateway", resource_id, region
+                        )
+                    )
+
+        # Internet Gateways
+        igw_data = resources.get("internet_gateways", {})
+        for igw in igw_data.get("details", []):
+            if isinstance(igw, dict):
+                tags = igw.get("tags", {})
+                resource_id = igw.get("id", "unknown")
+                if tags:
+                    violations.extend(
+                        check_resource_tags(
+                            tags, required_tags, valid_envs, valid_managed_by,
+                            "Internet Gateway", resource_id, region
+                        )
+                    )
+
+    # Check global resources (S3 buckets - checked via separate API)
+    # S3 tags require a per-bucket API call, handled in inventory if available
 
     return violations
 
