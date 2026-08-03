@@ -129,8 +129,10 @@ variable "tags" {
   description = "Tags applied to all CloudSentry infrastructure resources"
   type        = map(string)
   default = {
-    Project   = "cloudsentry"
-    ManagedBy = "terraform"
+    Project     = "cloudsentry"
+    ManagedBy   = "terraform"
+    Environment = "production"
+    Owner       = "durrell"
   }
 }
 
