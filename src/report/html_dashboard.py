@@ -95,93 +95,85 @@ def render_account_section(acct):
 </div>
 """
 
-    # Cost section
-    cost = acct.get("cost", {})
-    if cost or True:  # Always show cost section
-        html += f"""
-<div class="section">
-<h3>Cost</h3>
-<table>
-<tr><td>Month-to-date (gross)</td><td>${cost.get('month_to_date_gross', 0):.2f}</td></tr>
-<tr><td>Forecast (end of month)</td><td>${cost.get('forecast', 0):.2f}</td></tr>
-<tr><td>Last month (gross)</td><td>${cost.get('last_month_gross', 0):.2f}</td></tr>
-<tr><td>Usage</td><td>${cost.get('raw_usage_mtd', 0):.2f}</td></tr>
-<tr><td>Subscriptions (Kiro, etc.)</td><td>${cost.get('subscriptions_mtd', 0):.2f}</td></tr>
-<tr><td>Net after credits</td><td>${cost.get('month_to_date', 0):.2f}</td></tr>
-</table>
-"""
-        # Cost by service
-        top_services = cost.get("top_services", [])
-        if top_services:
-            html += '<h4 style="color:#94a3b8;margin-top:12px;">Cost by Service</h4>'
-            html += '<table>'
-            html += '<tr><th style="text-align:left">Service</th><th style="text-align:right">Cost</th></tr>'
-            for svc in top_services:
-                html += f'<tr><td>{svc["service"]}</td><td style="text-align:right">${svc["amount"]:.2f}</td></tr>'
-            html += '</table>'
-
-        # Burn rate
-        burn = cost.get("burn_rate", {})
-        daily_rate = burn.get("daily_rate", 0)
-        if daily_rate > 0:
-            html += f"""
-<h4 style="color:#94a3b8;margin-top:12px;">Burn Rate</h4>
-<table>
-<tr><td>Daily rate</td><td>${burn['daily_rate']:.2f}/day</td></tr>
-<tr><td>Monthly rate (current)</td><td>${burn['monthly_rate']:.2f}/month</td></tr>
-<tr><td>Annual rate (current)</td><td>${burn['annual_rate']:.2f}/year</td></tr>
-"""
-            if burn.get("potential_monthly_savings", 0) > 0:
-                html += f"""<tr><td>Potential savings (if all fixes applied)</td><td style="color:#4ade80">-${burn['potential_monthly_savings']:.2f}/month</td></tr>
-<tr><td>Optimized monthly rate</td><td style="color:#4ade80">${burn['optimized_monthly_rate']:.2f}/month</td></tr>
-<tr><td>Optimized annual rate</td><td style="color:#4ade80">${burn['optimized_annual_rate']:.2f}/year</td></tr>
-"""
-            html += "</table>"
-
-        # Credits
-        credits = cost.get("credits", {})
-        if credits.get("has_credits"):
-            total_applied = credits.get("total_credits_applied", 0)
-            this_month = credits.get("credits_this_month", 0)
-            last_month_credits = credits.get("credits_last_month", 0)
-
-            html += f"""
-<h4 style="color:#94a3b8;margin-top:12px;">Credits</h4>
-<table>
-<tr><td>Total credits applied (6 months)</td><td>${total_applied:.2f}</td></tr>
-<tr><td>Credits applied this month</td><td>${this_month:.2f}</td></tr>
-<tr><td>Credits applied last month</td><td>${last_month_credits:.2f}</td></tr>
-"""
-            coverage = burn.get("credits_coverage")
-            if coverage:
-                status = burn.get("credits_status", "")
-                status_color = "#4ade80" if status == "fully_covered" else "#eab308"
-                html += f'<tr><td>Coverage</td><td style="color:{status_color}">{coverage} of bill covered by credits</td></tr>'
-
-            html += "</table>"
-
-        html += "</div>"
-
-    # Findings
+    # Findings FIRST (visible by default)
     findings = acct.get("findings", [])
     if findings:
-        html += '<div class="section"><h3>Findings</h3><table class="findings-table">'
+        html += '<div class="section"><h3>Findings</h3><table class="data-table">'
         html += '<tr><th>Severity</th><th>Finding</th><th>Resource</th><th>Region</th></tr>'
         for f in sorted(findings, key=lambda x: {"critical": 0, "high": 1, "medium": 2, "low": 3}.get(x["severity"], 4)):
             sev_class = f["severity"]
-            html += f'<tr class="{sev_class}"><td><span class="badge {sev_class}">{f["severity"].upper()}</span></td>'
-            html += f'<td>{f["title"]}</td><td>{f.get("resource_id", "")}</td><td>{f.get("region", "")}</td></tr>'
+            html += f'<tr><td><span class="badge {sev_class}">{f["severity"].upper()}</span></td>'
+            html += f'<td>{f["title"]}</td><td class="mono">{f.get("resource_id", "")}</td><td>{f.get("region", "")}</td></tr>'
         html += '</table></div>'
 
-    # Violations
+    # Violations (if any)
     violations = acct.get("violations", [])
     if violations:
-        html += '<div class="section"><h3>Policy Violations</h3><table class="findings-table">'
+        html += '<div class="section"><h3>Policy Violations</h3><table class="data-table">'
         html += '<tr><th>Severity</th><th>Category</th><th>Violation</th><th>Resource</th></tr>'
         for v in sorted(violations, key=lambda x: {"critical": 0, "high": 1, "medium": 2, "low": 3}.get(x["severity"], 4)):
             html += f'<tr><td><span class="badge {v["severity"]}">{v["severity"].upper()}</span></td>'
-            html += f'<td>{v.get("category", "")}</td><td>{v["title"]}</td><td>{v.get("resource_id", "")}</td></tr>'
+            html += f'<td>{v.get("category", "")}</td><td>{v["title"]}</td><td class="mono">{v.get("resource_id", "")}</td></tr>'
         html += '</table></div>'
+
+    # Cost section (collapsible)
+    cost = acct.get("cost", {})
+    html += """
+<details class="section collapsible">
+<summary><h3>Cost Intelligence</h3></summary>
+<div class="details-content">
+"""
+    html += f"""<table class="data-table">
+<tr><td>Month-to-date (gross)</td><td class="value">${cost.get('month_to_date_gross', 0):.2f}</td></tr>
+<tr><td>Forecast (end of month)</td><td class="value">${cost.get('forecast', 0):.2f}</td></tr>
+<tr><td>Last month (gross)</td><td class="value">${cost.get('last_month_gross', 0):.2f}</td></tr>
+<tr><td>Usage</td><td class="value">${cost.get('raw_usage_mtd', 0):.2f}</td></tr>
+<tr><td>Subscriptions</td><td class="value">${cost.get('subscriptions_mtd', 0):.2f}</td></tr>
+<tr><td>Net after credits</td><td class="value">${cost.get('month_to_date', 0):.2f}</td></tr>
+</table>
+"""
+
+    # Cost by service
+    top_services = cost.get("top_services", [])
+    if top_services:
+        html += '<h4>Cost by Service</h4><table class="data-table">'
+        html += '<tr><th>Service</th><th class="value">Cost</th></tr>'
+        for svc in top_services:
+            html += f'<tr><td>{svc["service"]}</td><td class="value">${svc["amount"]:.2f}</td></tr>'
+        html += '</table>'
+
+    # Burn rate
+    burn = cost.get("burn_rate", {})
+    if burn.get("daily_rate", 0) > 0:
+        html += f"""<h4>Burn Rate</h4><table class="data-table">
+<tr><td>Daily rate</td><td class="value">${burn['daily_rate']:.2f}/day</td></tr>
+<tr><td>Monthly rate</td><td class="value">${burn['monthly_rate']:.2f}/month</td></tr>
+<tr><td>Annual rate</td><td class="value">${burn['annual_rate']:.2f}/year</td></tr>
+"""
+        if burn.get("potential_monthly_savings", 0) > 0:
+            html += f'<tr><td>Potential savings</td><td class="value positive">-${burn["potential_monthly_savings"]:.2f}/month</td></tr>'
+        html += "</table>"
+
+    # Credits
+    credits = cost.get("credits", {})
+    if credits.get("has_credits"):
+        total_applied = credits.get("total_credits_applied", 0)
+        this_month = credits.get("credits_this_month", 0)
+        last_month_credits = credits.get("credits_last_month", 0)
+
+        html += f"""<h4>Credits</h4><table class="data-table">
+<tr><td>Total applied (6 months)</td><td class="value">${total_applied:.2f}</td></tr>
+<tr><td>Applied this month</td><td class="value">${this_month:.2f}</td></tr>
+<tr><td>Applied last month</td><td class="value">${last_month_credits:.2f}</td></tr>
+"""
+        coverage = burn.get("credits_coverage")
+        if coverage:
+            status = burn.get("credits_status", "")
+            cls = "positive" if status == "fully_covered" else ""
+            html += f'<tr><td>Coverage</td><td class="value {cls}">{coverage} covered</td></tr>'
+        html += "</table>"
+
+    html += "</div></details>"
 
     html += '</section>'
     return html
@@ -209,7 +201,6 @@ header h1 { font-size: 2rem; color: #f8fafc; }
 .card.low { border-color: #64748b; }
 .account { background: #1e293b; border-radius: 12px; padding: 1.5rem; margin-bottom: 2rem; border: 1px solid #334155; }
 .account h2 { color: #f8fafc; margin-bottom: 1rem; }
-.account-id { color: #64748b; font-size: 0.85rem; font-weight: normal; }
 .score-section { display: flex; align-items: center; gap: 1.5rem; margin-bottom: 1.5rem; }
 .score-circle { width: 80px; height: 80px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 1.5rem; font-weight: bold; }
 .grade-a { background: #166534; color: #4ade80; }
@@ -221,16 +212,26 @@ header h1 { font-size: 2rem; color: #f8fafc; }
 .grade { font-size: 1.1rem; color: #f8fafc; }
 .regions { color: #94a3b8; font-size: 0.85rem; }
 .section { margin-top: 1.5rem; }
-.section h3 { color: #cbd5e1; margin-bottom: 0.5rem; }
-table { width: 100%; border-collapse: collapse; }
-td, th { padding: 0.5rem; text-align: left; border-bottom: 1px solid #334155; }
-th { color: #94a3b8; font-weight: 500; }
-.findings-table { font-size: 0.85rem; }
-.badge { padding: 2px 8px; border-radius: 4px; font-size: 0.7rem; font-weight: bold; }
+.section h3 { color: #cbd5e1; margin-bottom: 0.75rem; font-size: 1.1rem; }
+.section h4 { color: #94a3b8; margin: 1rem 0 0.5rem; font-size: 0.9rem; font-weight: 600; }
+.data-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; table-layout: fixed; }
+.data-table td, .data-table th { padding: 0.6rem 0.75rem; text-align: left; border-bottom: 1px solid #2d3748; vertical-align: top; }
+.data-table th { color: #94a3b8; font-weight: 500; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; }
+.data-table td.value, .data-table th.value { text-align: right; width: 140px; font-weight: 500; color: #f8fafc; }
+.data-table td.positive { color: #4ade80; }
+.data-table td.mono { font-family: 'SF Mono', 'Fira Code', monospace; font-size: 0.8rem; color: #94a3b8; }
+.badge { padding: 3px 8px; border-radius: 4px; font-size: 0.7rem; font-weight: bold; display: inline-block; min-width: 60px; text-align: center; }
 .badge.critical { background: #7f1d1d; color: #fca5a5; }
 .badge.high { background: #7c2d12; color: #fdba74; }
 .badge.medium { background: #713f12; color: #fde047; }
 .badge.low { background: #1e293b; color: #94a3b8; border: 1px solid #475569; }
+details.collapsible { margin-top: 1.5rem; }
+details.collapsible summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 0.5rem; }
+details.collapsible summary::-webkit-details-marker { display: none; }
+details.collapsible summary::before { content: "\\25B6"; font-size: 0.7rem; color: #64748b; transition: transform 0.2s; }
+details[open].collapsible summary::before { transform: rotate(90deg); }
+details.collapsible summary h3 { margin: 0; display: inline; }
+.details-content { margin-top: 0.75rem; padding-left: 0; }
 footer { text-align: center; margin-top: 2rem; color: #64748b; }
 footer a { color: #60a5fa; text-decoration: none; }
 """
