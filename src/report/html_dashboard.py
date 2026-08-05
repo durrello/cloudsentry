@@ -25,6 +25,12 @@ def generate_html_dashboard(report):
 </head>
 <body>
 <div class="container">
+<nav class="nav-bar">
+<a href="/reports/latest.html" class="nav-item active">Latest Report</a>
+<a href="/history.html" class="nav-item">History</a>
+<a href="/docs.html" class="nav-item">Documentation</a>
+<a href="https://github.com/durrello/cloudsentry" class="nav-item" target="_blank">GitHub</a>
+</nav>
 <header>
 <h1>CloudSentry Report</h1>
 <p class="date">{scan_date}</p>
@@ -185,6 +191,10 @@ def get_css():
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f172a; color: #e2e8f0; line-height: 1.6; }
 .container { max-width: 1200px; margin: 0 auto; padding: 2rem; }
+.nav-bar { display: flex; gap: 0.75rem; margin-bottom: 2rem; padding: 0.75rem 1rem; background: #1e293b; border-radius: 8px; flex-wrap: wrap; }
+.nav-item { color: #94a3b8; text-decoration: none; padding: 0.5rem 1rem; border-radius: 6px; font-size: 0.9rem; }
+.nav-item:hover { color: #f8fafc; background: #334155; }
+.nav-item.active { color: #f8fafc; background: #e94560; }
 header { text-align: center; margin-bottom: 2rem; }
 header h1 { font-size: 2rem; color: #f8fafc; }
 .date { color: #94a3b8; font-size: 1.1rem; }
