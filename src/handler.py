@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from config import load_config
 from utils.multi_account import get_sessions
 from utils.regions import get_active_regions
-from utils.dynamo import store_report, get_previous_report
+from utils.dynamo import store_report, get_previous_report, get_report_history
 from scanner.iam_audit import scan_iam
 from scanner.network_audit import scan_network
 from scanner.compute_audit import scan_compute
@@ -35,6 +35,7 @@ from report.builder import build_report
 from report.email_formatter import format_email
 from report.html_dashboard import generate_html_dashboard
 from report.slack_formatter import format_slack_message
+from report.static_pages import generate_history_page, generate_docs_page
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -178,6 +179,9 @@ def lambda_handler(event, context):
     html = generate_html_dashboard(full_report)
     upload_dashboard(html, scan_date)
 
+    # Generate and upload history + docs pages
+    upload_static_pages(all_account_reports)
+
     # Send email via SNS
     email_body = format_email(full_report)
     send_email(email_body, scan_date)
@@ -299,3 +303,35 @@ def send_slack(message, webhook_url):
         urlopen(req)
     except Exception as e:
         logger.error(f"Failed to send Slack notification: {e}")
+
+
+def upload_static_pages(account_reports):
+    """Upload history and docs pages to S3."""
+    import boto3
+
+    s3 = boto3.client("s3")
+    bucket = os.environ["S3_BUCKET"]
+
+    # Get scan history from DynamoDB for all accounts
+    all_history = []
+    for report in account_reports:
+        history = get_report_history(report["account_id"], weeks=52)
+        all_history.extend(history)
+
+    # Generate and upload history page
+    history_html = generate_history_page(all_history)
+    s3.put_object(
+        Bucket=bucket,
+        Key="history.html",
+        Body=history_html.encode("utf-8"),
+        ContentType="text/html",
+    )
+
+    # Generate and upload docs page
+    docs_html = generate_docs_page()
+    s3.put_object(
+        Bucket=bucket,
+        Key="docs.html",
+        Body=docs_html.encode("utf-8"),
+        ContentType="text/html",
+    )
